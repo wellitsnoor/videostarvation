@@ -4,6 +4,7 @@ import os
 import subprocess
 import shutil
 import random
+import argparse
 
 def find_ffmpeg():
     # First check if ffmpeg is in PATH
@@ -24,7 +25,7 @@ def find_ffmpeg():
     
     return None
 
-def convert_to_lowest_quality(input_file):
+def convert_to_lowest_quality(input_file, compress_video=True, compress_audio=True, high_quality=False):
     # Find FFmpeg
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
@@ -44,36 +45,52 @@ def convert_to_lowest_quality(input_file):
     random_num = random.randint(1000, 9999)
     output_file = os.path.join('downloads', f'output{random_num}.mp4')
     
-    # FFmpeg command with absolute lowest quality settings
-    ffmpeg_cmd = [
-        ffmpeg_path,
-        '-i', input_file,
-        '-vf', 'scale=256:144,noise=alls=20:allf=t+u',  # Lowest common resolution
-        '-c:v', 'libx264',       # H.264 codec
-        '-crf', '52',            # Maximum compression (worst quality)
-        '-preset', 'ultrafast',  # Fastest encoding
-        '-tune', 'zerolatency',  # Optimize for lowest latency
-        '-b:v', '1k',           # Very low video bitrate
-        '-maxrate', '1',       # Maximum bitrate
-        '-bufsize', '1',       # Buffer size
-        '-r', '5',              # 10 fps
-        '-c:a', 'aac',           # AAC audio codec
-        '-b:a', '2k',           # 16kbps audio (lowest reasonable)
-        '-ar', '7350',           # 8kHz audio sample rate
-        '-ac', '2',              # Mono audio
-        '-af', 'acrusher=bits=4:mode=log:aa=1,volume=2',
-        output_file
-    ]
+    # Base FFmpeg command
+    ffmpeg_cmd = [ffmpeg_path, '-i', input_file]
+
+    # Add video filters if video compression is enabled
+    if compress_video:
+        if high_quality:
+            scale_filter = "scale=1920:1080"
+        else:
+            scale_filter = "scale=192:108"
+        ffmpeg_cmd.extend(['-vf', f"{scale_filter},noise=alls=100:allf=t+u"])
+        ffmpeg_cmd.extend([
+            '-c:v', 'libx264',
+            '-crf', '52',
+            '-preset', 'ultrafast',
+            '-tune', 'zerolatency',
+            '-b:v', '100k',
+            '-maxrate', '300k',
+            '-bufsize', '300k',
+            '-r', '10'
+        ])
+    else:
+        ffmpeg_cmd.extend(['-c:v', 'copy'])
+
+    # Add audio filters if audio compression is enabled
+    if compress_audio:
+        ffmpeg_cmd.extend([
+            '-c:a', 'aac',
+            '-b:a', '0.1k',
+            '-ar', '7350',
+            '-ac', '2',
+            '-af', "acrusher=bits=30:mode=log:aa=1"
+        ])
+    else:
+        ffmpeg_cmd.extend(['-c:a', 'copy'])
+
+    ffmpeg_cmd.append(output_file)
     
     try:
         print(f"Using FFmpeg from: {ffmpeg_path}")
-        print("Converting to lowest possible quality...")
+        print("Converting with specified settings...")
         subprocess.run(ffmpeg_cmd, check=True)
         # Remove original file
         os.remove(input_file)
         # Rename the converted file to original name
         os.rename(output_file, input_file)
-        print("Video converted to lowest possible quality")
+        print("Video converted successfully")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error converting video: {str(e)}")
@@ -82,7 +99,7 @@ def convert_to_lowest_quality(input_file):
         print(f"Error during conversion: {str(e)}")
         return False
 
-def download_lowest_quality(url):
+def download_lowest_quality(url, compress_video=True, compress_audio=True, high_quality=False):
     # Create downloads directory if it doesn't exist
     if not os.path.exists('downloads'):
         os.makedirs('downloads')
@@ -92,16 +109,14 @@ def download_lowest_quality(url):
     output_filename = f'output{random_num}.mp4'
 
     ydl_opts = {
-        # Format selection for worst possible quality
-        'format': 'worst[ext=mp4]/worst',  # This ensures we get the worst quality without needing to merge streams
-        'outtmpl': os.path.join('downloads', output_filename),  # Save to downloads/ folder with simple name
+        'format': 'worst[ext=mp4]/worst',
+        'outtmpl': os.path.join('downloads', output_filename),
         'quiet': False,
         'no_warnings': False,
     }
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Get video info first
             info = ydl.extract_info(url, download=False)
             
             if info is None:
@@ -111,17 +126,15 @@ def download_lowest_quality(url):
             print(f"Downloading: {info['title']}")
             print("Quality: Lowest possible")
             
-            # Download the video
             ydl.download([url])
             
-            # Get the downloaded file path
             downloaded_file = os.path.join('downloads', output_filename)
             
-            # Convert to lowest possible quality
-            print("\nConverting to lowest possible quality...")
-            if convert_to_lowest_quality(downloaded_file):
+            print("\nConverting with specified settings...")
+            if convert_to_lowest_quality(downloaded_file, compress_video, compress_audio, high_quality):
                 print("\nDownload and conversion completed!")
                 print(f"File saved in downloads/ folder")
+                print("File name: ", output_filename)
             else:
                 print("\nDownload completed but conversion failed!")
                 print(f"Original file saved in downloads/ folder")
@@ -135,13 +148,23 @@ def download_lowest_quality(url):
         print("4. Make sure FFmpeg is installed and in your system PATH")
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: python starve.py <youtube_url>")
-        print("Example: python starve.py https://www.youtube.com/watch?v=dQw4w9WgXcQ")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description='Download and compress YouTube videos')
+    parser.add_argument('url', help='YouTube video URL')
+    parser.add_argument('-video', action='store_true', help='Compress only video')
+    parser.add_argument('-audio', action='store_true', help='Compress only audio')
+    parser.add_argument('-high', action='store_true', help='Use high quality settings (1080p)')
+    parser.add_argument('-low', action='store_true', help='Use low quality settings (192x108p)')
     
-    url = sys.argv[1]
-    download_lowest_quality(url)
+    args = parser.parse_args()
+    
+    # If neither -video nor -audio is specified, compress both
+    compress_video = args.video or not (args.video or args.audio)
+    compress_audio = args.audio or not (args.video or args.audio)
+    
+    # If both -high and -low are specified, -high takes precedence
+    high_quality = args.high
+    
+    download_lowest_quality(args.url, compress_video, compress_audio, high_quality)
 
 if __name__ == "__main__":
     main()

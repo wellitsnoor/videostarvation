@@ -1,0 +1,8 @@
+# Downloaded and converted videos
+/downloads/
+downloads/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class 
