@@ -1,10 +1,9 @@
-import yt_dlp
-import sys
 import os
 import subprocess
 import shutil
 import random
 import argparse
+
 
 def find_ffmpeg():
     # First check if ffmpeg is in PATH
@@ -26,6 +25,15 @@ def find_ffmpeg():
     return None
 
 def convert_to_lowest_quality(input_file, compress_video=True, compress_audio=True, high_quality=False):
+    # Check if input file exists
+    if not os.path.exists(input_file):
+        print(f"Error: Input file '{input_file}' not found!")
+        return False
+
+    # Create downloads directory if it doesn't exist
+    if not os.path.exists('output'):
+        os.makedirs('output')
+
     # Find FFmpeg
     ffmpeg_path = find_ffmpeg()
     if not ffmpeg_path:
@@ -43,13 +51,28 @@ def convert_to_lowest_quality(input_file, compress_video=True, compress_audio=Tr
 
     # Generate random number for output file
     random_num = random.randint(1000, 9999)
-    output_file = os.path.join('downloads', f'output{random_num}.mp4')
+    file_ext = os.path.splitext(input_file)[1]
+    
+    # For audio files, use AAC output
+    audio_extensions = ['.mp3', '.wav', '.aac', '.m4a', '.ogg']
+    if file_ext.lower() in audio_extensions:
+        output_file = os.path.join('output', f'testing{random_num}.aac')
+    else:
+        output_file = os.path.join('output', f'testing{random_num}{file_ext}')
     
     # Base FFmpeg command
     ffmpeg_cmd = [ffmpeg_path, '-i', input_file]
 
-    # Add video filters if video compression is enabled
-    if compress_video:
+    # Check if input is video file
+    video_extensions = ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv']
+
+    
+    is_video = file_ext.lower() in video_extensions
+
+    
+
+    # Add video filters if video compression is enabled and input is video
+    if compress_video and is_video:
         if high_quality:
             scale_filter = "scale=1920:1080"
         else:
@@ -65,19 +88,23 @@ def convert_to_lowest_quality(input_file, compress_video=True, compress_audio=Tr
             '-bufsize', '300k',
             '-r', '10'
         ])
-    else:
+    elif is_video:
         ffmpeg_cmd.extend(['-c:v', 'copy'])
 
-    # Add audio filters if audio compression is enabled
-    if compress_audio:
+    # Check if input has audio
+    audio_extensions = ['.mp3', '.wav', '.aac', '.m4a', '.ogg']
+    has_audio = file_ext.lower() in audio_extensions or is_video
+
+    # Add audio filters if audio compression is enabled and input has audio
+    if compress_audio and has_audio:
         ffmpeg_cmd.extend([
             '-c:a', 'aac',
-            '-b:a', '0.1k',
+            '-b:a', '0.01k',
             '-ar', '7350',
             '-ac', '2',
-            '-af', "acrusher=bits=30:mode=log:aa=1"
+            '-strict', 'experimental'
         ])
-    else:
+    elif has_audio:
         ffmpeg_cmd.extend(['-c:a', 'copy'])
 
     ffmpeg_cmd.append(output_file)
@@ -85,86 +112,45 @@ def convert_to_lowest_quality(input_file, compress_video=True, compress_audio=Tr
     try:
         print(f"Using FFmpeg from: {ffmpeg_path}")
         print("Converting with specified settings...")
-        subprocess.run(ffmpeg_cmd, check=True)
-        # Remove original file
-        os.remove(input_file)
-        # Rename the converted file to original name
-        os.rename(output_file, input_file)
-        print("Video converted successfully")
-        return True
+        print(f"Input file: {input_file}")
+        print(f"Output file: {output_file}")
+        print(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")  # Print the full command
+        
+        # Run FFmpeg with output capture
+        result = subprocess.run(ffmpeg_cmd, check=True, capture_output=True, text=True)
+        print("FFmpeg output:", result.stdout)
+        print("FFmpeg errors:", result.stderr)
+        
+        # Check if output file exists and has size
+        if os.path.exists(output_file):
+            size = os.path.getsize(output_file)
+            print(f"Output file created with size: {size} bytes")
+            print(f"Converted file saved to: {output_file}")
+            return True
+        else:
+            print("Error: Output file was not created!")
+            return False
+            
     except subprocess.CalledProcessError as e:
-        print(f"Error converting video: {str(e)}")
+        print(f"Error converting file: {str(e)}")
+        print(f"FFmpeg error output: {e.stderr}")
         return False
     except Exception as e:
         print(f"Error during conversion: {str(e)}")
         return False
 
-def download_lowest_quality(url, compress_video=True, compress_audio=True, high_quality=False):
-    # Create downloads directory if it doesn't exist
-    if not os.path.exists('downloads'):
-        os.makedirs('downloads')
-
-    # Generate random number for output file
-    random_num = random.randint(1000, 9999)
-    output_filename = f'output{random_num}.mp4'
-
-    ydl_opts = {
-        'format': 'worst[ext=mp4]/worst',
-        'outtmpl': os.path.join('downloads', output_filename),
-        'quiet': False,
-        'no_warnings': False,
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            
-            if info is None:
-                print("Error: Could not extract video information")
-                return
-                
-            print(f"Downloading: {info['title']}")
-            print("Quality: Lowest possible")
-            
-            ydl.download([url])
-            
-            downloaded_file = os.path.join('downloads', output_filename)
-            
-            print("\nConverting with specified settings...")
-            if convert_to_lowest_quality(downloaded_file, compress_video, compress_audio, high_quality):
-                print("\nDownload and conversion completed!")
-                print(f"File saved in downloads/ folder")
-                print("File name: ", output_filename)
-            else:
-                print("\nDownload completed but conversion failed!")
-                print(f"Original file saved in downloads/ folder")
-            
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        print("\nTroubleshooting tips:")
-        print("1. Make sure the video URL is correct")
-        print("2. Check your internet connection")
-        print("3. Try using a different YouTube video URL")
-        print("4. Make sure FFmpeg is installed and in your system PATH")
-
-def main():
-    parser = argparse.ArgumentParser(description='Download and compress YouTube videos')
-    parser.add_argument('url', help='YouTube video URL')
-    parser.add_argument('-video', action='store_true', help='Compress only video')
-    parser.add_argument('-audio', action='store_true', help='Compress only audio')
-    parser.add_argument('-high', action='store_true', help='Use high quality settings (1080p)')
-    parser.add_argument('-low', action='store_true', help='Use low quality settings (192x108p)')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Convert media files to lowest quality')
+    parser.add_argument('input_file', help='Path to the input media file')
+    parser.add_argument('-video', action='store_true', help='Disable video compression')
+    parser.add_argument('-audio', action='store_true', help='Disable audio compression')
+    parser.add_argument('-high', action='store_true', help='Use higher quality settings')
     
     args = parser.parse_args()
     
-    # If neither -video nor -audio is specified, compress both
-    compress_video = args.video or not (args.video or args.audio)
-    compress_audio = args.audio or not (args.video or args.audio)
-    
-    # If both -high and -low are specified, -high takes precedence
-    high_quality = args.high
-    
-    download_lowest_quality(args.url, compress_video, compress_audio, high_quality)
-
-if __name__ == "__main__":
-    main()
+    convert_to_lowest_quality(
+        args.input_file,
+        compress_video=not args.video,
+        compress_audio=not args.audio,
+        high_quality=args.high
+    )

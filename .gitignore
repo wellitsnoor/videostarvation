@@ -1,6 +1,8 @@
 # Downloaded and converted videos
 /downloads/
 downloads/
+/output/
+output/
 
 # Python
 __pycache__/
